@@ -1,6 +1,6 @@
 package com.domainsugester.domain_finder.batch.messaging.listener;
 
-import com.domainsugester.domain_finder.batch.config.RabbitMQConfig;
+import com.domainsugester.domain_finder.shared.config.RabbitMQConfig;
 import com.domainsugester.domain_finder.batch.messaging.events.DomainSubmitedEvent;
 import com.domainsugester.domain_finder.batch.service.BatchService;
 import lombok.RequiredArgsConstructor;

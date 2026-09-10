@@ -1,5 +1,6 @@
 package com.domainsugester.domain_finder.mail.service;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +13,7 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class SmtpEmailSender {
     private final JavaMailSender mailSender;
-    @Value("${app.mail.from}")
+    @Value("${mail.from}")
     private String fromAddress;
 
     public void send(String email, String body) throws MessagingException {

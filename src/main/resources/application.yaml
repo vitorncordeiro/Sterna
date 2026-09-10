@@ -1,4 +1,18 @@
 spring:
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${GMAIL_USERNAME}
+    password: ${GMAIL_APP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   rabbitmq:
     host: localhost
     port: 5672
@@ -39,12 +53,11 @@ logging:
 iana:
   data-base-url: ${IANA_DATA_BASE_URL}
   base-url: ${IANA_BASE_URL}
-hostinger:
-  api:
-    token: ${HOSTINGER_API_TOKEN}
 playwright:
   server:
     url: ws://localhost:3000
+mail:
+  from: ${GMAIL_USERNAME}
 rdap:
   client:
     url: http://rdap.org
