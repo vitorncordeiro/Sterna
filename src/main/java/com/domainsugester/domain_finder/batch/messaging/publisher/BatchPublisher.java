@@ -16,7 +16,7 @@ public class BatchPublisher {
         template.convertAndSend(RabbitMQConfig.DOMAIN_EXCHANGE, RabbitMQConfig.DOMAIN_BINDING_KEY, event);
     }
     public void publish(FinishedBatchEvent event){
-        template.convertAndSend(RabbitMQConfig.DOMAIN_EXCHANGE, RabbitMQConfig.DOMAIN_BINDING_KEY, event);
+        template.convertAndSend(RabbitMQConfig.EMAIL_EXCHANGE, RabbitMQConfig.EMAIL_BATCH_FINISHED_BINDING_KEY, event);
     }
 
 }

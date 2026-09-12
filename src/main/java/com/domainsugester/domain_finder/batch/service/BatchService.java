@@ -38,28 +38,28 @@ public class BatchService {
     public void processDomain(DomainSubmitedEvent event) throws IOException {
         Boolean result = domainService.getDomain(event.domain()) == null ? Boolean.TRUE : Boolean.FALSE;
         addDomainAvailabilityToBatchResult(event.batchId(), event.domain(), result);
-        if(batchCacheService.getBatchRemaining(event.batchId()) == 1){
+        Integer remaining = batchCacheService.decr(event.batchId());
+        if (remaining != null && remaining == 0) {
             BatchResult batchResult = batchCacheService.getBatchResult(event.batchId());
-            publishFinishedBatchMessage(batchResult);
-        } else{
-            batchCacheService.decr(event.batchId());
+            String recipient = batchCacheService.getRecipient(event.batchId());
+            publishFinishedBatchMessage(batchResult, recipient);
         }
     }
 
-    public String processTextRequest(BatchTextRequest domains) {
+    public String processTextRequest(BatchTextRequest domains, String initiatorEmail) {
         TextValidationResult result = validateDomains(domains);
-        processDomainBatch(new ArrayList<>(result.validDomains()));
+        processDomainBatch(new ArrayList<>(result.validDomains()), initiatorEmail);
         return "ok";
     }
 
-    public String processTextFileRequest(MultipartFile file) throws IOException {
+    public String processTextFileRequest(MultipartFile file, String initiatorEmail) throws IOException {
         fileValidation(file);
         FileValidationResult result = validateAndReadDomains(file);
-        processDomainBatch(result.validDomains());
+        processDomainBatch(result.validDomains(), initiatorEmail);
         return "ok";
     }
 
-    private void processDomainBatch(List<String> domains){
+    private void processDomainBatch(List<String> domains, String initiatorEmail){
         DomainBatchInfo batchInfo = DomainBatchInfo.builder()
                 .batchId(UUID.randomUUID())
                 .batchRemaining(domains.size())
@@ -67,6 +67,9 @@ public class BatchService {
                 .build();
 
         batchCacheService.saveRemaining(batchInfo.batchId(), batchInfo.batchSize());
+        batchCacheService.saveRecipient(batchInfo.batchId(), initiatorEmail);
+        // initialize empty BatchResult to avoid NPE in listeners
+        batchCacheService.saveBatchResult(batchInfo.batchId(), new BatchResult(new HashMap<>()));
         for (String domain : domains) {
             publishDomainMessage(domain, batchInfo.batchId());
         }
@@ -75,6 +78,9 @@ public class BatchService {
 
     private void addDomainAvailabilityToBatchResult(UUID batchId, String domain, Boolean isAvailable) {
         BatchResult batchResult = batchCacheService.getBatchResult(batchId);
+        if (batchResult == null) {
+            batchResult = new BatchResult(new HashMap<>());
+        }
         batchResult.domainAvailability().put(domain, isAvailable);
         batchCacheService.saveBatchResult(batchId, batchResult);
     }
@@ -121,8 +127,8 @@ public class BatchService {
         DomainSubmitedEvent event = new DomainSubmitedEvent(domain, batchId);
         batchPublisher.publish(event);
     }
-    private void publishFinishedBatchMessage(BatchResult batchResult){
-        FinishedBatchEvent event = new FinishedBatchEvent(batchResult.domainAvailability());
+    private void publishFinishedBatchMessage(BatchResult batchResult, String recipientEmail){
+        FinishedBatchEvent event = new FinishedBatchEvent(batchResult.domainAvailability(), recipientEmail);
         batchPublisher.publish(event);
     }
 

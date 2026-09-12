@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <title>Batch Result</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 8px; }
+        th { background: #f4f4f4; }
+    </style>
+</head>
+<body>
+<h2>Batch Result</h2>
+<p>Domains checked:</p>
+<table>
+    <thead>
+    <tr>
+        <th>Domain</th>
+        <th>Available</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr th:each="entry : ${domainAvailability.entrySet()}">
+        <td th:text="${entry.key}">domain</td>
+        <td th:text="${entry.value} ? 'Yes' : 'No'">Yes/No</td>
+    </tr>
+    </tbody>
+</table>
+</body>
+</html>
