@@ -6,6 +6,7 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -38,7 +39,33 @@ public class BatchCacheService {
         return (Integer) redisTemplate.opsForValue().get("batch:" + batchId.toString() + ":remaining");
     }
     public BatchResult getBatchResult(UUID batchId){
-        LinkedHashMap batchResult = (LinkedHashMap) redisTemplate.opsForValue().get("batch:" + batchId.toString());
-        return new BatchResult(batchResult);
+        Object stored = redisTemplate.opsForValue().get("batch:" + batchId.toString());
+        if (stored == null) return null;
+        // If we stored a BatchResult object directly, just return it
+        if (stored instanceof BatchResult br) {
+            return br;
+        }
+        // When RedisTemplate deserializes a JSON representation it may come back as a LinkedHashMap
+        if (stored instanceof LinkedHashMap) {
+            LinkedHashMap outer = (LinkedHashMap) stored;
+            // common shape: { "domainAvailability": {"example.com": false, ... } }
+            Object maybeInner = outer.get("domainAvailability");
+            Map<String, Boolean> domainMap = new LinkedHashMap<>();
+            if (maybeInner instanceof Map) {
+                Map<?,?> innerMap = (Map<?,?>) maybeInner;
+                for (Map.Entry<?,?> e : innerMap.entrySet()) {
+                    domainMap.put(String.valueOf(e.getKey()), Boolean.valueOf(String.valueOf(e.getValue())));
+                }
+                return new BatchResult(domainMap);
+            }
+            // fallback: maybe the outer map is already the domain map
+            for (Object key : outer.keySet()) {
+                Object v = outer.get(key);
+                domainMap.put(String.valueOf(key), Boolean.valueOf(String.valueOf(v)));
+            }
+            return new BatchResult(domainMap);
+        }
+        // unknown shape: return empty result to avoid breaking callers
+        return new BatchResult(new LinkedHashMap<>());
     }
 }
