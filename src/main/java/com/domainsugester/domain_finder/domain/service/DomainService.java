@@ -17,6 +17,7 @@ public class DomainService {
     private final RdapClient rdapClient;
     private final HostingerTldCacheService hostingerTldCacheService;
     private final WhoisService whoisService;
+    public static final String AVAILABLE_DOMIN = "Available domain";
 
     public String getDomain(String domain) throws IOException {
         System.out.println(domain);
@@ -35,7 +36,7 @@ public class DomainService {
             System.out.println(domainInfo);
             return domainInfo.toString();
         }catch (FeignException e){
-            return "Available domain";
+            return AVAILABLE_DOMIN;
         }
     }
     private String getRdapUrl(String domain) {
