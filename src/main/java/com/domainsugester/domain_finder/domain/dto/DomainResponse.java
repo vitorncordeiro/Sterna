@@ -1,10 +1,9 @@
 package com.domainsugester.domain_finder.domain.dto;
 
 import java.time.Instant;
+import java.util.Map;
 
 public record DomainResponse(
-        String domainName,
-        Boolean avaliable,
-        Instant created
+        Map<String, Boolean> availability
 ) {
 }

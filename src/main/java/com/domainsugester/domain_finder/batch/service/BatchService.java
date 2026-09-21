@@ -36,8 +36,9 @@ public class BatchService {
     );
 
     public void processDomain(DomainSubmitedEvent event) throws IOException {
-        Boolean result = domainService.getDomain(event.domain())
-                .equalsIgnoreCase(DomainService.AVAILABLE_DOMIN) ? Boolean.TRUE : Boolean.FALSE;
+        Boolean result = domainService.getDomain(event.domain(), false)
+                .availability().get(event.domain());
+
         addDomainAvailabilityToBatchResult(event.batchId(), event.domain(), result);
         Integer remaining = batchCacheService.decr(event.batchId());
         if (remaining != null && remaining == 0) {

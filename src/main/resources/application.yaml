@@ -1,4 +1,12 @@
 spring:
+  ai:
+    google:
+      genai:
+        api-key: ${GEMINI_API_KEY}
+        chat:
+          options:
+            model: gemini-2.5-flash
+            temperature: 1.0
   mail:
     host: smtp.gmail.com
     port: 587
