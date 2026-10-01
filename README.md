@@ -1,350 +1,142 @@
 # Sterna
 
-## About the Project
+Backend em Spring Boot para consulta de disponibilidade de domínios, com busca direta em RDAP, fallback para WHOIS, sugestões por IA, autenticação Google, cache em Redis e processamento assíncrono com RabbitMQ.
 
-This project is a RESTful API that allows users to search for domain name availability. When a requested domain is unavailable, the service integrates with a Large Language Model (LLM) to generate creative alternative suggestions, which are then verified individually until ten available options are found and returned to the user.
+## Visão geral
 
-Domain availability is checked directly against official RDAP (Registration Data Access Protocol) servers. The application periodically fetches the IANA RDAP bootstrap file, which maps every TLD in existence to its official RDAP server, and caches this map in Redis. When a domain is searched, the application resolves the correct RDAP server for its TLD and queries it directly — no third-party domain APIs or paid services involved.
+O projeto centraliza a validação de domínios e o fluxo de batch em uma API REST. Quando o domínio não está disponível, o serviço pode gerar variações com IA e testar cada sugestão individualmente.
 
-For every available domain found — whether the originally searched one or an AI-generated suggestion — the API automatically includes a direct registration link through the Hostinger affiliate program, allowing users to register the domain in one click.
+Também há integração com:
 
-Users can authenticate with their Google account to access their personal search history and saved domains.
+- **MongoDB** para usuários autenticados.
+- **Redis** para cache de TLDs e resultados de batch.
+- **RabbitMQ** para desacoplar o processamento do batch e o envio de e-mail.
+- **SMTP/Thymeleaf/PDF** para notificação do resultado do batch por e-mail com anexo PDF.
+- **Feign** para integrações externas.
+- **Playwright** para coletar os TLDs disponíveis na Hostinger.
 
-### Main Goals
+## Arquitetura
 
-- Provide a fast and reliable domain search experience backed by official registry data.
-- Keep domain verification free and independent by querying RDAP servers directly.
-- Leverage LLM capabilities to generate relevant and creative domain suggestions when the searched name is taken.
-- Surface a direct Hostinger registration link for every available domain found.
-- Persist search history per authenticated user.
-- Simplify deployment in containerized environments.
+![architecture.png](backend/docs/architecture.png)
+Arquivo de apoio para apresentação: `backend/docs/roteiro-arquitetura.md`
 
----
+## Principais fluxos
 
-## Technologies Used
+### Consulta de domínio
 
-### Java 21
-The latest LTS version of Java, focused on performance and modern language features.
-Documentation: https://docs.oracle.com/en/java/javase/21/
+1. `DomainController` recebe `POST /api/domains/{domain}`.
+2. `DomainService` resolve o RDAP correto a partir do TLD.
+3. Se houver RDAP, a API consulta o servidor oficial.
+4. Se não houver RDAP, o fluxo usa WHOIS.
+5. Se o domínio estiver indisponível e a opção estiver habilitada, a IA gera variações próximas.
 
-### Spring Boot 3
-The core application framework, providing auto-configuration, dependency injection, scheduling, and the embedded web server.
-Documentation: https://docs.spring.io/spring-boot/docs/current/reference/html/
+### Batch de domínios
 
-### Spring Security + OAuth2
-Handles authentication via Google OAuth2. Users log in with their Google account and their session is stored server-side in Redis via Spring Session.
-Documentation: https://docs.spring.io/spring-security/reference/
+1. `BatchController` recebe uma lista em texto ou um arquivo `.txt`.
+2. `BatchService` valida o conteúdo e publica eventos no RabbitMQ.
+3. `BatchListener` processa cada domínio e acumula o resultado no Redis.
+4. Quando o lote termina, `BatchNotificationListener` gera um PDF e envia por e-mail.
 
-### Spring AI
-The integration layer for LLM communication. Spring AI provides a unified abstraction over providers like Anthropic Claude, handling prompt templating, model configuration, and response parsing out of the box. Swapping providers requires only a configuration change.
-Documentation: https://docs.spring.io/spring-ai/reference/
+### Bootstrapping de TLDs
 
-### Spring Retry
-Used in the IANA bootstrap scheduler to automatically retry failed HTTP requests with configurable backoff. Prevents a transient network failure from leaving the TLD cache stale.
-Documentation: https://docs.spring.io/spring-retry/docs/current/reference/html/
+1. `IanaBootstrapService` lê o bootstrap da IANA.
+2. Os TLDs e seus servidores RDAP são armazenados no Redis.
+3. `HostingerTldAvailabilityService` complementa a base com os TLDs capturados da Hostinger.
 
-### IANA RDAP Bootstrap
-The application fetches the official IANA RDAP bootstrap file (`https://data.iana.org/rdap/dns.json`) on startup and on a daily schedule. This file maps every TLD to its official RDAP server. The parsed map is cached in Redis and used to resolve the correct RDAP endpoint for any domain search. Compound TLDs such as `.com.br` are handled with a fallback strategy that first attempts to match the full suffix before falling back to the rightmost label.
-IANA bootstrap file: https://data.iana.org/rdap/dns.json
+## Endpoints
 
-### RDAP (Registration Data Access Protocol)
-The modern standard for querying domain registration data, replacing WHOIS. Each TLD has its own RDAP server. The application queries the appropriate server directly:
-- HTTP `404` means the domain is not registered — available.
-- HTTP `200` means the domain is registered — not available.
-  Documentation: https://about.rdap.org/
+### Domínios
 
-### WHOIS Protocol
+- `POST /api/domains/{domain}?withAiSuggestions=true|false`
 
-Used as a fallback for TLDs that do not have an RDAP server. The application queries the WHOIS server for the TLD and parses the response to determine availability. This is only used when no RDAP server is available for a given TLD.
+### Batch
 
-### Redis
-Used for two purposes: caching domain search results and the IANA TLD map to avoid redundant lookups, and storing authenticated user sessions via Spring Session.
-Documentation: https://redis.io/docs/
+- `POST /api/batch/text`
+- `POST /api/batch/file`
 
-### MongoDB
-A NoSQL database used to persist user accounts and domain search history in a flexible and scalable way.
-Documentation: https://www.mongodb.com/docs/
+### Autenticação
 
-### RabbitMQ
-Used for asynchronous processing. After a domain search completes, the result is published to a RabbitMQ queue and consumed in the background to persist the search history in MongoDB. This keeps the HTTP response time low by decoupling persistence from the request lifecycle.
-Documentation: https://www.rabbitmq.com/docs
-
-### Lombok
-Reduces boilerplate code by automatically generating getters, setters, constructors, and builders.
-Documentation: https://projectlombok.org/
-
-### Hostinger Affiliate Program
-When a domain is confirmed as available, the API builds a registration URL pointing to Hostinger through its affiliate program. The link is returned alongside each available domain in the response so any frontend can render a direct register button without additional logic. The affiliate code is externalized as an environment variable.
-Affiliate program: https://www.hostinger.com/affiliates
-
-### Docker
-A containerization platform used to create consistent and portable environments for deployment.
-Documentation: https://docs.docker.com/
-
----
-
-## How It Works
-
-### IANA Bootstrap Job
-
-On startup and every day at 3am, the application fetches the IANA RDAP bootstrap file and parses it into a flat map of `TLD → RDAP server URL`. This map is stored in Redis with a 7-day TTL.
-
-If the fetch fails, Spring Retry automatically retries up to 3 times with exponential backoff (5s, 10s, 20s) before logging the error and keeping the previous cached map.
-
-### Domain Search Flow
-
-```
-GET /domains/search?name=mystore&tlds=.com,.io,.dev
-
-1. Check Redis cache — return immediately if found
-
-2. Resolve the TLD from the domain name
-   "mystore.com" -> TLD "com" -> "https://rdap.verisign.com/com/v1/"
-
-3. Query the RDAP server
-   GET https://rdap.verisign.com/com/v1/domain/mystore.com
-   404 -> available   |   200 -> not available
-
-4. If available -> build response with Hostinger registration URL and return
-
-5. If not available -> call Spring AI (Claude) for 25 domain suggestions
-
-6. For each suggestion, resolve TLD and query the respective RDAP server
-
-7. Collect the first 10 available suggestions, each with its Hostinger URL
-
-8. Publish DomainSearchedEvent to RabbitMQ (history saved asynchronously)
-
-9. Save result to Redis cache
-
-10. Return response
-```
-
-### Google Authentication Flow
-
-```
-1. Frontend redirects to GET /oauth2/authorization/google
-
-2. Spring redirects the user to Google's consent screen
-
-3. User approves
-
-4. Google redirects to GET /login/oauth2/code/google?code=...
-
-5. Spring exchanges the code for an access token and fetches user info
-
-6. CustomOAuth2UserService finds or creates the user in MongoDB
-
-7. Spring creates a session stored in Redis and sets a SESSION cookie
-
-8. All subsequent requests are authenticated via the cookie
-```
-
----
-
-## Features
-
-- Search domain availability for any TLD known to the IANA bootstrap registry.
-- Compound TLD support (e.g. `.com.br`, `.co.uk`) with automatic RDAP server resolution.
-- Automatic LLM-powered suggestions when a domain is taken, verified against official RDAP servers.
-- Smart Redis caching for search results (24h TTL) and the IANA TLD map (7d TTL).
-- Daily IANA bootstrap refresh with retry and exponential backoff.
-- Asynchronous search history persistence via RabbitMQ.
-- Google OAuth2 authentication — users see only their own history.
-- Direct Hostinger affiliate registration link for every available domain.
-- Admin endpoints to inspect and manually refresh the IANA cache.
-- Full Docker support for fast deployment in any environment.
-
----
-
-## API Reference
-
-### Domain Search
-
-```
-GET /domains/search?name=mystore&tlds=.com,.io,.dev
-```
-
-Public endpoint. Authentication is optional — if authenticated, the search is linked to the user's history.
-
-```json
-{
-  "searched": "mystore.com",
-  "available": false,
-  "registrationUrl": null,
-  "suggestions": [
-    {
-      "domain": "getmystore.com",
-      "available": true,
-      "registrationUrl": "https://www.hostinger.com/register-domain?domain=getmystore.com&REFERRALCODE=YOUR_CODE"
-    },
-    {
-      "domain": "mystore.io",
-      "available": true,
-      "registrationUrl": "https://www.hostinger.com/register-domain?domain=mystore.io&REFERRALCODE=YOUR_CODE"
-    }
-  ],
-  "cachedResult": false
-}
-```
-
-### Authentication
-
-```
-GET  /oauth2/authorization/google   Start Google login flow
-GET  /auth/me                       Returns authenticated user data (401 if not logged in)
-POST /auth/logout                   Invalidates session
-```
-
-### Search History (requires authentication)
-
-```
-GET    /domains/history             Full search history for the authenticated user
-GET    /domains/history/{domain}    History for a specific domain
-DELETE /domains/history/{id}        Delete a history entry
-```
+- `GET /oauth2/authorization/google`
+- `GET /api/auth/me`
+- `POST /auth/logout`
 
 ### Admin
 
-```
-GET  /admin/iana/bootstrap          Inspect the current cached TLD map
-POST /admin/iana/bootstrap/refresh  Manually trigger a bootstrap refresh
-```
+- `GET /api/admin/ianaBootstrap`
+- `POST /api/admin/ianaBootstrap/refresh`
 
----
+## Estrutura principal
 
-## Project Architecture
-
-```
-src/
-├── controller/
-│   ├── DomainController.java
-│   ├── AuthController.java
-│   └── AdminController.java
-├── service/
-│   ├── domain/
-│   │   ├── DomainSearchService.java
-│   │   ├── DomainCheckService.java
-│   │   └── TldExtractor.java
-│   ├── iana/
-│   │   ├── IanaBootstrapClient.java
-│   │   ├── IanaBootstrapParser.java
-│   │   └── IanaCacheService.java
-│   ├── suggestion/
-│   │   └── DomainSuggestionService.java
-│   └── affiliate/
-│       └── AffiliateService.java
-├── client/
-│   └── RdapClient.java
-├── scheduler/
-│   └── IanaBootstrapScheduler.java
-├── messaging/
-│   ├── publisher/
-│   │   └── DomainEventPublisher.java
-│   └── consumer/
-│       └── SearchHistoryConsumer.java
-├── model/
-│   ├── DomainResult.java
-│   ├── DomainSearchResult.java
-│   ├── SearchHistory.java
-│   └── User.java
-├── cache/
-│   └── DomainCacheService.java
-├── security/
-│   ├── AuthenticatedUser.java
-│   └── CustomOAuth2UserService.java
-├── config/
-│   ├── SecurityConfig.java
-│   ├── RedisConfig.java
-│   ├── RabbitConfig.java
-│   └── SpringAiConfig.java
-└── exception/
-    ├── GlobalExceptionHandler.java
-    ├── TldNotSupportedException.java
-    └── RdapServerException.java
+```text
+src/main/java/com/domainsugester/domain_finder/
+├── auth/        # OAuth2 e usuário autenticado
+├── batch/       # Batch, RabbitMQ, PDF e e-mail
+├── domain/      # Consulta de disponibilidade
+├── iana/        # Bootstrap e cache de TLDs
+├── registrar/   # Integrações com Hostinger
+├── tld/         # Serviços de TLD e refresh do bootstrap
+├── whois/       # Fallback WHOIS
+├── ai/          # Geração de variações com IA
+├── mail/        # Envio de e-mail
+└── shared/      # Configurações gerais
 ```
 
----
+## Como executar
 
-## How to Run the Project
+### Pré-requisitos
 
-### Prerequisites
+- Java 21
+- Maven
+- Redis
+- RabbitMQ
+- MongoDB
+- Conta Google OAuth2
+- Chave da API do Gemini
+- Servidor Playwright rodando em `ws://localhost:3000`
 
-- Docker and Docker Compose
-- Java 17
-- Maven (or use the included `mvnw` wrapper)
-- A Google Cloud project with OAuth2 credentials configured (see Google Auth Guideline)
+### Passos
 
-### Steps
-
-1. Clone the repository:
+1. Entre na pasta do backend:
 
 ```bash
-git clone https://github.com/your-username/domain-search-api.git
-cd domain-search-api
+cd backend
 ```
 
-2. Create a `.env` file at the project root based on `.env.example`:
-
-```env
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-SPRING_AI_ANTHROPIC_API_KEY=your_anthropic_api_key
-REDIS_HOST=localhost
-REDIS_PORT=6379
-MONGO_URI=mongodb://localhost:27017/domainsearch
-RABBITMQ_HOST=localhost
-RABBITMQ_PORT=5672
-RABBITMQ_USER=admin
-RABBITMQ_PASS=admin
-HOSTINGER_AFFILIATE_CODE=your_affiliate_code
-```
-
-3. Start the infrastructure:
+2. Configure o `.env` com base em `.env.example`.
+3. Suba a infraestrutura local:
 
 ```bash
 docker-compose up -d
 ```
 
-4. Build and run the application:
+4. Execute a aplicação:
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-5. Access the API at `http://localhost:8080`.
-6. Access the RabbitMQ management UI at `http://localhost:15672` (user: admin / pass: admin).
-7. Access the Swagger UI at `http://localhost:8080/swagger-ui.html`.
+## Variáveis de ambiente
 
-### Docker Compose Services
+As principais variáveis usadas pela aplicação são:
 
-- MongoDB on port 27017
-- Redis on port 6379
-- RabbitMQ on port 5672 (management UI on 15672)
-- Spring Boot application on port 8080
+- `MONGO_URI`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `IANA_BASE_URL`
+- `IANA_DATA_BASE_URL`
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `ICANN_ACCOUNT_USERNAME`
+- `ICANN_ACCOUNT_PASSWORD`
+- `CZDS_DIRECTORY`
+- `RABBITMQ_HOST`
+- `RABBITMQ_PORT`
+- `RABBITMQ_USERNAME`
+- `RABBITMQ_PASSWORD`
+- `GMAIL_USERNAME`
+- `GMAIL_APP_PASSWORD`
+- `GEMINI_API_KEY`
 
----
+## Roteiro de vídeo
 
-## Contributing
-
-Contributions are welcome. To contribute:
-
-1. Fork the repository.
-2. Create a new branch: `git checkout -b feature/your-feature-name`
-3. Commit your changes: `git commit -m 'Add some feature'`
-4. Push to the branch: `git push origin feature/your-feature-name`
-5. Open a Pull Request.
-
----
-
-## License
-
-MIT License
-
-Copyright (c) 2025
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+Veja `backend/docs/roteiro-arquitetura.md` para um roteiro curto, em português, pensado para gravação de até 8 minutos.
